@@ -143,13 +143,6 @@ async function getFriendRequests(requestBody){
     friends = friends.map(friend => friend.id)
     console.log(friends)
     console.log(user_id)
-    const validate_chat = (owners, friends) => {
-
-        for (let id of owners){
-            if (friends.includes(id)){return false}
-        }
-        return true
-    }
     let {data, error} = await supabase
         .from('chats')
         .select('*')
@@ -159,10 +152,8 @@ async function getFriendRequests(requestBody){
     for (let chat of data){
         let owners = chat.owners
         console.log(owners)
-        let isRequest = () => {
-            for (let owner of owners){if (owner == user_id){return true}}
-            return false
-        }
+        let isRequest = false
+        for (let owner of owners){if (owner == user_id){isRequest = true}}
         console.log(isRequest)
         if (isRequest){
             console.log(owners)
@@ -171,6 +162,12 @@ async function getFriendRequests(requestBody){
             if (friend_request.length != 0){requested_friendships.push(friend_request[0])}
         }
     }
+    let blocked = (await getBlockedUsers(user_id))[0].blocked
+    if (blocked == null){blocked = []}
+    console.log(blocked)
+
+    requested_friendships = requested_friendships.filter(friendship => blocked.includes(friendship) == false)
+
     console.log(requested_friendships)
     let requested_friendships_procesado = []
     for (let user of requested_friendships){
@@ -184,6 +181,7 @@ async function getFriendRequests(requestBody){
     alreadyFriended = await JSON.parse(alreadyFriended)
     alreadyFriended = alreadyFriended.map(friend => friend.id)
     requested_friendships_procesado = requested_friendships_procesado.filter(friendship => alreadyFriended.includes(friendship.id) == false)
+
     console.log(alreadyFriended)
     console.log(requested_friendships_procesado)
 
@@ -259,11 +257,21 @@ async function getServerData(requestBody){
     let channels = await getServerChannels(server_id)
     let messages = await getServerMessages(server_id)
     let admins = await getServerAdmins(server_id)
+    let join = await getJoinRequests(server_id)
+    for (let i = 0; i < join.length; i++){
+        let id = join[i].sender
+        console.log(id)
+        let username = await getUsername(id)
+        console.log(username)
+        join[i].username = username
+    }
+    console.log(join)
     let response = {
         members: members,
         channels: channels,
         messages: messages,
-        admins: admins
+        admins: admins,
+        join: join
     }
     console.log(response)
 
@@ -323,15 +331,31 @@ async function getServerAdmins(server_id){
     return admins
 }
 
+async function getJoinRequests(server_id){
+    let {data, error} = await supabase
+        .from('join_requests')
+        .select('*')
+        .eq('server', server_id)
+    if (error){console.log(error)} else {return data}
+}
+
 async function sendGroupMessage(requestBody){
     console.log(requestBody)
     let {chat_id, channel_id, body, sender} = requestBody
+    let sender_username = sender
     sender = await getUser(sender)
     sender = sender.id
-    const {data, error} = await supabase
-        .from('messages')
-        .insert([{chat_id, channel_id, body, sender}])
-    if (error){console.log(error)} else {return true}
+    let members = await getServerMembers(chat_id)
+    members = members.map(member => member.username)
+    console.log(members)
+    console.log(sender_username)
+    if (members.includes(sender_username)){
+        console.log('sending...')
+        const {data, error} = await supabase
+            .from('messages')
+            .insert([{chat_id, channel_id, body, sender}])
+        if (error){console.log(error)} else {return true}
+    } else {return false}
 }
 
 async function getChannelMessages(requestBody){
@@ -370,7 +394,8 @@ async function validateAdmin(server_id, username){
 async function KickOut(requestBody){
     console.log(requestBody)
     let id = requestBody.member.id
-    revokeAdmin(requestBody) //TODO: Make sure this works
+    console.log(id)
+    if (id == undefined){id = await getUser(requestBody.member); id = id.id} else {revokeAdmin(requestBody)}
     console.log(id)
     let users = await getServerMembers(requestBody.chat_id)
     let owners = users.filter(user => user.id != id)
@@ -378,6 +403,7 @@ async function KickOut(requestBody){
     console.log(owners)
     let sender = requestBody.sender
     let isAdmin = await validateAdmin(requestBody.chat_id, sender)
+    if (requestBody.sender ==  requestBody.member){isAdmin = true}
     console.log(isAdmin)
     if (isAdmin){
         const {data, error} = await supabase
@@ -466,6 +492,119 @@ async function InviteFriend(requestBody){
     return response
 }
 
+async function getBlockedUsers(user_id, needs_username = false){
+    console.log(user_id)
+    let {data, error} = await supabase
+        .from('users')
+        .select('blocked')
+        .eq('id', user_id)
+    if (error){console.log(error); return []}
+    if (needs_username){
+        data = data[0].blocked
+        console.log(data)
+        if (data == null){return []}
+        data = await Promise.all(data.map(async id => {return {id: id, username: await getUsername(id)}}))
+        console.log(data)
+    }
+    console.log(data)
+    return data
+}
+
+async function blockUser(requestBody){
+    console.log(requestBody)
+    let user_id = (await getUser(requestBody.username)).id
+    console.log(user_id)
+    let blocked = (await getBlockedUsers(user_id))[0].blocked
+    if (blocked == null){blocked = []}
+    blocked.push(requestBody.block)
+    console.log(blocked)
+    const {data, error} = await supabase 
+        .from('users')
+        .update({blocked: blocked})
+        .eq('id', user_id)
+    if (error){console.log(error)}
+    return blocked
+} 
+
+async function unblockUser(requestBody){
+    console.log(requestBody)
+    let user_id = (await getUser(requestBody.username)).id
+    console.log(user_id)
+    let blocked = (await getBlockedUsers(user_id))[0].blocked
+    let unblock = requestBody.unblock
+    blocked = blocked.filter(user => user != unblock)
+    console.log(blocked)
+    const {data, error} = await supabase
+        .from('users')
+        .update({blocked:blocked})
+        .eq('id', user_id)
+    if (error){console.log(error)}
+    let response = await getBlockedUsers(user_id, true)
+    console.log(response)
+    return response
+}
+
+async function getServerQuery(requestBody){
+    let query = requestBody.query
+    let username = requestBody.username
+    console.log(query, username)
+    let {data, error} = await supabase
+        .from('chats')
+        .select('*')
+        .eq('is_group', true)
+    let servers = await data
+    console.log(query)
+    servers = servers.filter(server => server.name.startsWith(query))   
+    console.log(servers)
+
+    return servers
+}
+
+async function sendJoinRequest(requestBody){
+    console.log(requestBody)
+    let sender = (await getUser(requestBody.sender_username)).id
+    let server = requestBody.server
+    console.log(sender, server)
+    let identifier =  `${sender}->${server}`
+    let {data, error} = await supabase
+        .from('join_requests')
+        .insert([{sender, server, identifier}])
+    if (error){console.log(error); return false}
+    return true
+}
+
+async function rejectJoin(requestBody){
+    let request_id = requestBody.request_id
+    let {error} = await supabase
+        .from('join_requests')
+        .delete()
+        .eq('id', request_id)
+    if (error){console.log(error); return false}
+    let join = await getJoinRequests(requestBody.server_id)
+    return join
+}
+
+async function acceptJoin(requestBody){
+    let request_id = requestBody.request_id
+    let server = requestBody.server_id
+    let user_id  = requestBody.user_id
+    let current_users = await getServerMembers(server)
+    current_users = current_users.map(user => user.id)
+    if (current_users.includes(user_id) == false){current_users.push(user_id)}
+    console.log(current_users)
+    let {data, error} = await supabase
+        .from('chats')
+        .update({owners:current_users})
+        .eq('id', server)
+    if (error){console.log(error);return false}
+    rejectJoin(requestBody)
+    let response = {
+        join: await getJoinRequests(server),
+        users: await getServerMembers(server)
+    }
+    return response 
+}
+
 export async function POST(requestEvent){
     let requestBody = await requestEvent.request.text();
     requestBody = JSON.parse(requestBody)
@@ -490,6 +629,13 @@ export async function POST(requestEvent){
     if (requestBody.type == 'GRANT_ADMIN'){response = await grantAdmin(requestBody)}
     if (requestBody.type == 'REVOKE_ADMIN'){response = await revokeAdmin(requestBody)}
     if (requestBody.type == 'INVITE_FRIEND'){response = await InviteFriend(requestBody)}
+    if (requestBody.type == 'BLOCK_USER'){response = await blockUser(requestBody)}
+    if (requestBody.type == 'GET_BLOCKED_USERS'){let user_id  = await getUser(requestBody.username); response = await getBlockedUsers(user_id.id, true)}
+    if (requestBody.type == 'UNBLOCK_USER'){response = await unblockUser(requestBody)}
+    if (requestBody.type == 'GET_SERVER_QUERY'){response = await getServerQuery(requestBody)}
+    if (requestBody.type == 'SEND_JOIN_REQUEST'){response = await sendJoinRequest(requestBody)}
+    if (requestBody.type == 'REJECT_JOIN_REQUEST'){response = await rejectJoin(requestBody)}
+    if (requestBody.type == 'ACCEPT_JOIN_REQUEST'){response = await acceptJoin(requestBody)}
     console.log(response)
     return new Response(JSON.stringify(response))
 }

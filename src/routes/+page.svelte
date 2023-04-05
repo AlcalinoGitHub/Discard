@@ -13,7 +13,13 @@
     let chatting_with;
     let chatId
     let server_user = writable([])
+    let blocked = writable([])
 
+    /*
+    TODO:
+        Implement server join requests
+        Implement blocking users
+    */
 
     async function getFriends(){
         let requestBody = {
@@ -46,6 +52,20 @@
         })
         console.log(response)
         let data = await response.json()
+        console.log(data)
+        return data
+    }
+
+    async function getBlockedUsers(){
+        let requestBody = {
+            username: userName,
+            type: 'GET_BLOCKED_USERS'
+        }
+        let response = await fetch('/',{
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+        let data = (await response.json())
         console.log(data)
         return data
     }
@@ -88,6 +108,10 @@
         let server_user_data = await getServers()
         server_user.set(server_user_data)
         console.log(server_user_data)
+
+        let blocked_users_data = await getBlockedUsers()
+        blocked.set(blocked_users_data)
+        console.log(blocked_users_data)
     })
     const logout = () => {Cookies.remove('AUTH'); window.location.href = '/'}
 
@@ -293,6 +317,9 @@
             if (friend.id == chatting_with){isStillFriend = true}
         }
         if (!isStillFriend){chatData = null; ChatUser = null}
+
+        let blocked_users_data = await getBlockedUsers()
+        blocked.set(blocked_users_data)
     }
 
     async function acceptFriend(id){
@@ -301,6 +328,49 @@
 
         let friendData = await getFriends();
         friends.set(friendData)
+
+        let friend_request_data = await getFriendRequests()
+        friendRequest.set(friend_request_data) 
+    }
+
+    async function BlockUser(id){
+        let requestBody = {
+            block: id,
+            username: userName,
+            type: 'BLOCK_USER'
+        }
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+
+        let data = await response.json()
+        console.log(data)
+
+        let friend_request_data = await getFriendRequests()
+        friendRequest.set(friend_request_data) 
+
+        let blocked_users_data = await getBlockedUsers()
+        console.log(blocked_users_data)
+        blocked.set(blocked_users_data)
+
+    }
+
+    async function unblockUser(id){
+        console.log(id)
+        let requestBody = {
+            unblock: id,
+            username: userName,
+            type: 'UNBLOCK_USER'
+        }
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+
+        let blocked_users_data = await getBlockedUsers()
+        console.log(blocked_users_data)
+        blocked.set(blocked_users_data)
 
         let friend_request_data = await getFriendRequests()
         friendRequest.set(friend_request_data) 
@@ -381,6 +451,8 @@
     let isAdmin;
     let members;
     let invatableFriends = writable([])
+    let join_requests = writable([])
+
     function sortById(array) {
         return array.sort((a, b) => {
             const idA = parseInt(a.id);
@@ -459,6 +531,11 @@
         friends = friends.filter(friend => ValidateFriendNotOnServer(friend.id))
         console.log(friends)
         invatableFriends.set(friends)
+
+        let join_request_data = data.join
+        join_requests.set(join_request_data)
+        //TODO: Finish implementing join requests on the admin panel
+        console.log(join_request_data)
     }
 
     async function SendGroupMessage(){
@@ -481,6 +558,7 @@
         })
         let data = await response.json()
         console.log(data)
+        if (!data){window.location.href = '/'}
         let current_channel_messages = await getGroupMessages()
         console.log(current_channel_messages)
         channel_messages.set(current_channel_messages)
@@ -633,6 +711,8 @@
 
         let data = await response.json()
         getServerData(server_data)
+        console.log(requestBody.sender, requestBody.member)
+        if (requestBody.sender == requestBody.member){window.location.href = '/'}
     }
 
     async function InviteToServer(friend){
@@ -668,12 +748,98 @@
         invatableFriends.set(friends)  
     }
 
+    let serverQuery = writable([])
+    async function getServerQuery(){
+        let query = document.getElementById('serverQuery').value
+        if (query == ''){serverQuery.set([]);return}
+        let requestBody = {
+            query: query,
+            username: userName,
+            type: 'GET_SERVER_QUERY'
+        }
+        console.log(requestBody)
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+        let data = await response.json()
+        console.log(data)
+        let alreadyIn = (await getServers()).map(server => server.id)
+        console.log(alreadyIn)
+        data = data.filter(server => alreadyIn.includes(server.id) == false)
+        console.log(data)
+        serverQuery.set(data)
+    }
 
+    async function sendJoinRequest(server_data){
+        console.log(server_data)
+        let server = server_data.id
+        let sender_username = userName
+        let requestBody = {
+            sender_username: sender_username,
+            server: server,
+            type: 'SEND_JOIN_REQUEST'
+        }
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+        let data = await response.json()
+        console.log(data)
+        if (data){
+            let button = document.getElementById(`join: ${server_data.name}`)   
+            button.innerHTML = 'sent...'
+        } else {
+            let button = document.getElementById(`join: ${server_data.name}`)   
+            button.innerHTML = 'cant send duplicate requests'
+        }
+    }
+
+    async function rejectJoin(request){
+        console.log(request)
+        let requestBody = {
+            user_id: request.sender,
+            request_id: request.id,
+            server_id: request.server,
+            type: 'REJECT_JOIN_REQUEST'
+        }
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+        let data = await response.json()
+        console.log(data)
+        join_requests.set(data)
+
+        //TODO: IMPLEMENT REJECT AND ACCEPT USERS
+    }
+
+    async function acceptJoin(request){
+        console.log(request)
+        let requestBody = {
+            user_id: request.sender,
+            request_id: request.id,
+            server_id: request.server,
+            type: 'ACCEPT_JOIN_REQUEST'
+        }
+        let response = await fetch('/', {
+            body: JSON.stringify(requestBody),
+            method: 'POST'
+        })
+        let data = await response.json()
+        console.log(data)
+        let joins = data.join
+        let members = data.users
+        join_requests.set(joins)
+        server_members.set(members)
+
+    }
 
 </script>
 
 <h1>Discard TM ©</h1>
-<div on:click={logout}>Logout</div>
+<h3>Logged in as: {userName}</h3>
+<button on:click={logout}>Logout</button>
 
 <div>
     <div>Add friend</div>
@@ -702,8 +868,17 @@
 <div id = 'friend_requests'>
     <div>Friend requests</div>
     {#each $friendRequest as request}
-        <div on:click = {acceptFriend(request.id)}>{request.username}</div>
+        <div>{request.username}</div> 
+        <button on:click = {acceptFriend(request.id)}>Accept</button>
+        <button on:click = {BlockUser(request.id)}>Block</button>
     {/each}
+
+    <br><br>
+    <div>Blocked users</div>
+    {#each $blocked as user}
+        <div>{user.username} <button on:click = {unblockUser(user.id)}>Unblock</button></div>
+    {/each}
+
 </div>
 
 
@@ -740,6 +915,18 @@
 {/if}
 
 
+<br>
+<div>
+    <i>Join an existing server</i><br>
+    <input type = 'text' id = 'serverQuery' placeholder = 'Look for a server' on:input = {getServerQuery}>
+
+    {#each $serverQuery as server}
+        <div>{server.name} <button on:click = {sendJoinRequest(server)} id = 'join: {server.name}'>Send request</button></div>
+    {/each}
+
+</div>
+
+
 
 <div>
     <br>
@@ -768,6 +955,7 @@
     {/each}
 </div>
 
+
 <br><br>
 <div>
     <div>Your servers:</div>
@@ -781,6 +969,8 @@
     <div>Server: {server_name}</div>
 
     <div>Channel: {$channel_name}</div>
+
+    <button on:click = {KickOut(userName)}>Leave Server</button> <br>
 
     <i> Enter a Channel </i>
     <div>General <button on:click = {changeToGeneralChannel}>Enter</button></div>
@@ -836,6 +1026,11 @@
         <h4>Add a user</h4>
         {#each $invatableFriends as friend} 
             <div> {friend.username}  <button on:click={InviteToServer(friend)}>Add</button></div>
+        {/each}
+
+        <h4>Accept a user</h4>
+        {#each $join_requests as request}
+            <div>{request.username} <button on:click = {acceptJoin(request)}>accept</button> <button on:click = {rejectJoin(request)}>reject</button>  </div>
         {/each}
 
         <br>

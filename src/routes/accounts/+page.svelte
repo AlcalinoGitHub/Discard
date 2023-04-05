@@ -20,7 +20,7 @@
         })
         let result;
         let serverResponse = await response.then((response) => response  = response.json().then((response) => result = (response.message)))
-        if (result){alert('User created')}
+        if (result){Cookies.set('AUTH', JSON.stringify(user)); window.location.href = '/'}
         else {alert('Username is taken')}
     }
 
@@ -43,7 +43,7 @@
         })
         let result;
         let serverResponse = await response.then((response) => response  = response.json().then((response) => result = (response.message)))
-        if (result){alert('Logged');Cookies.set('AUTH', JSON.stringify(user)); window.location.href = '/'}
+        if (result){Cookies.set('AUTH', JSON.stringify(user)); window.location.href = '/'}
         else {alert('User not found')}
     }
 
